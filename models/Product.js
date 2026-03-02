@@ -1,0 +1,116 @@
+const mongoose = require('mongoose');
+
+const productSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Product name is required'],
+    trim: true,
+  },
+  slug: {
+  type: String,
+  unique: true,
+  lowercase: true,
+  required: true,
+},
+  sku: {
+    type: String,
+    unique: true,
+    uppercase: true,
+  },
+  description: {
+    type: String,
+  },
+  shortDescription: {
+    type: String,
+  },
+  category: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category',
+    required: [true, 'Category is required'],
+  },
+  brand: {
+    type: String,
+    trim: true,
+  },
+  images: [String],
+  price: {
+    mrp:          { type: Number, required: true },      // Maximum Retail Price
+    sellingPrice: { type: Number, required: true },      // Actual selling price
+    costPrice:    { type: Number },                      // Cost to shop (private)
+    discount:     { type: Number, default: 0 },          // Percentage discount
+  },
+  stock: {
+    quantity:    { type: Number, default: 0 },
+    unit:        { type: String, default: 'piece' },    // piece, box, dozen, kg
+    minOrderQty: { type: Number, default: 1 },
+    maxOrderQty: { type: Number, default: 100 },
+    lowStockAlert:{ type: Number, default: 10 },
+  },
+  specifications: {
+    weight:     { type: String },   // e.g. "200g"
+    dimensions: { type: String },   // e.g. "10x5x3 cm"
+    color:      { type: String },
+    duration:   { type: String },   // burn duration e.g. "30 seconds"
+    height:     { type: String },   // cracker shoot height
+    noise:      { type: String, enum: ['silent', 'low', 'medium', 'loud'] },
+    type:       { type: String },   // aerial, ground, sparkler, etc.
+  },
+  safetyInfo: {
+    ageRestriction: { type: Number, default: 18 },
+    safetyTips:     [String],
+    hazardLevel:    { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+  },
+  tags: [String],
+  isFeatured:   { type: Boolean, default: false },
+  isActive:     { type: Boolean, default: true },
+  isDeleted:    { type: Boolean, default: false },
+  deletedAt:    { type: Date },
+  deletedBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+  ratings: {
+    average: { type: Number, default: 0 },
+    count:   { type: Number, default: 0 },
+  },
+  totalSold: {
+    type: Number,
+    default: 0,
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+  },
+}, { timestamps: true });
+
+// Auto-generate slug and SKU
+productSchema.pre('validate', function (next) {
+  // Generate slug
+  if (this.name) {
+    this.slug =
+      this.name
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '') +
+      '-' +
+      Date.now();
+  }
+
+  // Generate SKU
+  if (!this.sku) {
+    this.sku =
+      'CRK-' +
+      Math.random().toString(36).substring(2, 8).toUpperCase();
+  }
+
+  // Calculate discount
+  if (this.price?.mrp && this.price?.sellingPrice) {
+    this.price.discount = Math.round(
+      ((this.price.mrp - this.price.sellingPrice) /
+        this.price.mrp) *
+        100
+    );
+  }
+
+  next();
+});
+
+module.exports = mongoose.model('Product', productSchema);
