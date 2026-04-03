@@ -80,7 +80,7 @@ router.patch('/admin/orders/:id/status',  protectAdmin, checkPermission('orders'
 router.patch('/admin/orders/:id/payment', protectAdmin, checkPermission('orders','update'), orderCtrl.updatePaymentStatus);
 router.delete('/admin/orders/:id',        protectAdmin, checkPermission('orders','delete'), orderCtrl.deleteOrder);
 // Customer orders
-router.post('/customer/orders',    protectCustomer, orderCtrl.createOrder);
+router.post('/customer/orders', orderCtrl.createOrder);
 router.get('/customer/orders',     protectCustomer, orderCtrl.getAllOrders);
 router.get('/customer/orders/:id', protectCustomer, orderCtrl.getOrder);
 
