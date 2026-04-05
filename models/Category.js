@@ -1,5 +1,17 @@
 const mongoose = require('mongoose');
 
+const offerSchema = new mongoose.Schema({
+  isActive: { type: Boolean, default: false },
+  label: { type: String, trim: true },            // e.g. "Diwali Sale"
+  discountType: {
+    type: String,
+    enum: ['percentage', 'fixed'],
+    default: 'percentage',
+  },
+  discountValue: { type: Number, default: 0 },    // e.g. 10 (for 10% or ₹10)
+  expiresAt: { type: Date, default: null },
+}, { _id: false });
+
 const categorySchema = new mongoose.Schema({
   name: {
     type: String,
@@ -12,32 +24,20 @@ const categorySchema = new mongoose.Schema({
     unique: true,
     lowercase: true,
   },
-  description: {
-    type: String,
-  },
-  image: {
-    type: String,
-  },
+  description: { type: String },
+  image: { type: String },
   parentCategory: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Category',
     default: null,
   },
-  isActive: {
-    type: Boolean,
-    default: true,
-  },
-  isDeleted: {
-    type: Boolean,
-    default: false,
-  },
-  sortOrder: {
-    type: Number,
-    default: 0,
-  },
+  offer: { type: offerSchema, default: () => ({ isActive: false }) },
+  isActive: { type: Boolean, default: true },
+  isDeleted: { type: Boolean, default: false },
+  sortOrder: { type: Number, default: 0 },
 }, { timestamps: true });
 
-// Auto-generate slug
+// Auto-generate slug from name
 categorySchema.pre('validate', function (next) {
   if (this.name) {
     this.slug = this.name
