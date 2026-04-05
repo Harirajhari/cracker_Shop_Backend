@@ -4,12 +4,10 @@ const jwt = require('jsonwebtoken');
 const signToken = (id) =>
   jwt.sign({ id, type: 'admin' }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
 
-// @POST /api/admin/auth/login
+// ── Login ─────────────────────────────────────────────────────────────────────
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    console.log(`🔐 Login attempt: ${email}`);
-    
     if (!email || !password)
       return res.status(400).json({ success: false, message: 'Email and password required.' });
 
@@ -31,29 +29,36 @@ exports.login = async (req, res) => {
   }
 };
 
-// @GET /api/admin/auth/me
+// ── Get me ────────────────────────────────────────────────────────────────────
 exports.getMe = async (req, res) => {
   res.json({ success: true, data: req.admin });
 };
 
-// @POST /api/admin/admins - Create admin (by super_admin or admin)
+// ── Create staff (admin only) ─────────────────────────────────────────────────
+// POST /api/admin/admins
 exports.createAdmin = async (req, res) => {
   try {
-    const { name, email, password, phone, role, permissions } = req.body;
+    const { name, email, password, phone } = req.body;
 
-    // Only super_admin can create super_admin
-    if (role === 'super_admin' && req.admin.role !== 'super_admin')
-      return res.status(403).json({ success: false, message: 'Only super_admin can create another super_admin.' });
+    // Only admins can create accounts; always creates 'staff'
+    const newAdmin = new Admin({
+      name, email, password, phone,
+      role: 'staff',
+      createdBy: req.admin._id,
+    });
+    newAdmin.setRolePermissions();
+    await newAdmin.save();
 
-    const admin = new Admin({ name, email, password, phone, role, createdBy: req.admin._id });
-    
-    // Set default role permissions, then override if custom permissions provided
-    admin.setRolePermissions();
-    if (permissions) admin.permissions = permissions;
+    // Log to creator
+    await req.admin.logActivity({
+      action: 'created_staff',
+      module: 'other',
+      targetId: newAdmin._id,
+      targetName: newAdmin.name,
+    });
 
-    await admin.save();
-    admin.password = undefined;
-    res.status(201).json({ success: true, message: 'Admin created successfully.', data: admin });
+    newAdmin.password = undefined;
+    res.status(201).json({ success: true, message: 'Staff created successfully.', data: newAdmin });
   } catch (err) {
     if (err.code === 11000)
       return res.status(400).json({ success: false, message: 'Email already exists.' });
@@ -61,12 +66,11 @@ exports.createAdmin = async (req, res) => {
   }
 };
 
-// @GET /api/admin/admins
+// ── Get all staff (admin only) ────────────────────────────────────────────────
 exports.getAllAdmins = async (req, res) => {
   try {
-    const { role, isActive, page = 1, limit = 10, search } = req.query;
-    const filter = { isDeleted: false };
-    if (role) filter.role = role;
+    const { isActive, search, page = 1, limit = 20 } = req.query;
+    const filter = { isDeleted: false, role: 'staff' }; // only show staff list
     if (isActive !== undefined) filter.isActive = isActive === 'true';
     if (search) filter.name = { $regex: search, $options: 'i' };
 
@@ -83,54 +87,68 @@ exports.getAllAdmins = async (req, res) => {
   }
 };
 
-// @GET /api/admin/admins/:id
+// ── Get single staff + activity ───────────────────────────────────────────────
 exports.getAdmin = async (req, res) => {
   try {
-    const admin = await Admin.findOne({ _id: req.params.id, isDeleted: false }).populate('createdBy', 'name email');
-    if (!admin) return res.status(404).json({ success: false, message: 'Admin not found.' });
+    const admin = await Admin.findOne({ _id: req.params.id, isDeleted: false, role: 'staff' })
+      .select('+activityLog')
+      .populate('createdBy', 'name email');
+    if (!admin) return res.status(404).json({ success: false, message: 'Staff not found.' });
     res.json({ success: true, data: admin });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// @PUT /api/admin/admins/:id
+// ── Update staff ──────────────────────────────────────────────────────────────
 exports.updateAdmin = async (req, res) => {
   try {
-    const { name, phone, role, permissions, isActive } = req.body;
-    const admin = await Admin.findOne({ _id: req.params.id, isDeleted: false });
-    if (!admin) return res.status(404).json({ success: false, message: 'Admin not found.' });
+    const { name, phone, isActive } = req.body;
+    const admin = await Admin.findOne({ _id: req.params.id, isDeleted: false, role: 'staff' });
+    if (!admin) return res.status(404).json({ success: false, message: 'Staff not found.' });
 
-    // Only super_admin can change role
-    if (role && req.admin.role !== 'super_admin')
-      return res.status(403).json({ success: false, message: 'Only super_admin can change roles.' });
-
-    if (name) admin.name = name;
-    if (phone) admin.phone = phone;
+    if (name)              admin.name = name;
+    if (phone)             admin.phone = phone;
     if (isActive !== undefined) admin.isActive = isActive;
-    if (role) { admin.role = role; admin.setRolePermissions(); }
-    if (permissions) admin.permissions = permissions;
 
     await admin.save();
-    res.json({ success: true, message: 'Admin updated.', data: admin });
+    res.json({ success: true, message: 'Staff updated.', data: admin });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// @DELETE /api/admin/admins/:id  (soft delete)
+// ── Delete staff (soft) ───────────────────────────────────────────────────────
 exports.deleteAdmin = async (req, res) => {
   try {
-    if (req.params.id === req.admin._id.toString())
-      return res.status(400).json({ success: false, message: 'Cannot delete yourself.' });
-
-    const admin = await Admin.findOne({ _id: req.params.id, isDeleted: false });
-    if (!admin) return res.status(404).json({ success: false, message: 'Admin not found.' });
+    const admin = await Admin.findOne({ _id: req.params.id, isDeleted: false, role: 'staff' });
+    if (!admin) return res.status(404).json({ success: false, message: 'Staff not found.' });
 
     admin.isDeleted = true;
-    admin.isActive = false;
+    admin.isActive  = false;
     await admin.save();
-    res.json({ success: true, message: 'Admin deleted (soft).' });
+
+    await req.admin.logActivity({
+      action: 'deleted_staff',
+      module: 'other',
+      targetId: admin._id,
+      targetName: admin.name,
+    });
+
+    res.json({ success: true, message: 'Staff deleted.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ── Get staff activity log ────────────────────────────────────────────────────
+// GET /api/admin/admins/:id/activity
+exports.getAdminActivity = async (req, res) => {
+  try {
+    const admin = await Admin.findOne({ _id: req.params.id, isDeleted: false, role: 'staff' })
+      .select('+activityLog');
+    if (!admin) return res.status(404).json({ success: false, message: 'Staff not found.' });
+    res.json({ success: true, data: admin.activityLog || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
